@@ -1,11 +1,13 @@
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 from datetime import datetime, timedelta, timezone
 import json, os, traceback
 
 # ================= ENV =================
 TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
+VI_PHAM_ROLE_ID = int(os.getenv("VI_PHAM_ROLE_ID", "0"))
+
 DATA_FILE = "data.json"
 VN_TZ = timezone(timedelta(hours=7))
 DEADLINE_DAYS = 7
@@ -25,7 +27,6 @@ PENALTY = {
 
 # ================= BOT =================
 intents = discord.Intents.default()
-intents.guilds = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -67,34 +68,31 @@ def get_user(uid):
     return data["users"][uid]
 
 def countdown(deadline):
-    now = datetime.now(VN_TZ)
-    diff = deadline - now
+    diff = deadline - datetime.now(VN_TZ)
     if diff.total_seconds() <= 0:
-        return "🔴 **QUÁ HẠN**"
-    return f"⏳ **{diff.days} ngày {diff.seconds // 3600} giờ**"
+        return "🔴 QUÁ HẠN"
+    return f"⏳ {diff.days} ngày {diff.seconds // 3600} giờ"
 
-def make_embed(title, desc, color):
-    e = discord.Embed(
-        title=title,
-        description=desc,
-        color=color,
-        timestamp=datetime.now(VN_TZ)
-    )
+def make_embed(title, color):
+    e = discord.Embed(title=title, color=color, timestamp=datetime.now(VN_TZ))
     e.set_footer(text=FOOTER, icon_url=ICON)
     return e
 
-async def send_log(embed: discord.Embed):
-    cid = data["config"].get("log_channel")
-    if not cid:
-        return
-    ch = bot.get_channel(cid)
-    if ch:
-        await ch.send(embed=embed)
+async def send_log(embed):
+    try:
+        cid = data["config"].get("log_channel")
+        if not cid:
+            return
+        ch = bot.get_channel(cid)
+        if ch and ch.permissions_for(ch.guild.me).send_messages:
+            await ch.send(embed=embed)
+    except Exception as e:
+        print("LOG ERROR:", e)
 
 # ================= FAIL SAFE =================
 @bot.tree.error
-async def on_app_command_error(interaction: discord.Interaction, error):
-    print("❌ Slash error:", error)
+async def on_app_command_error(interaction, error):
+    print("SLASH ERROR:", error)
     if interaction.response.is_done():
         await interaction.followup.send("❌ Bot gặp lỗi nội bộ", ephemeral=True)
     else:
@@ -103,35 +101,34 @@ async def on_app_command_error(interaction: discord.Interaction, error):
 # ================= CONFIRM VIEW =================
 class ConfirmView(discord.ui.View):
     def __init__(self, member, record):
-        super().__init__(timeout=120)
+        super().__init__(timeout=None)
         self.member = member
         self.record = record
 
     @discord.ui.button(label="✅ ĐÃ ĐÓNG", style=discord.ButtonStyle.success)
-    async def confirm(self, interaction: discord.Interaction, _):
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_admin(interaction.user):
             return await interaction.response.send_message("❌ Admin only", ephemeral=True)
+
+        if self.record.get("paid"):
+            button.disabled = True
+            return await interaction.response.edit_message(view=self)
 
         self.record["paid"] = True
         self.record["paid_at"] = datetime.now(VN_TZ).isoformat()
         save()
 
-        e = make_embed(
-            "✅ XÁC NHẬN ĐÓNG PHẠT",
-            f"{self.member.mention} đã hoàn tất hình phạt.",
-            0x2ecc71
-        )
-        await interaction.response.edit_message(embed=e, view=None)
+        button.disabled = True
+
+        e = make_embed("✅ XÁC NHẬN ĐÃ ĐÓNG", 0x2ecc71)
+        e.add_field(name="👤 Thành viên", value=self.member.mention, inline=False)
+
+        await interaction.response.edit_message(embed=e, view=self)
         await send_log(e)
 
 # ================= MODAL =================
-class GhiSeoModal(discord.ui.Modal, title="⚔️ GHI SẸO CIARA"):
-    lydo = discord.ui.TextInput(
-        label="📌 Lý do vi phạm",
-        style=discord.TextStyle.paragraph,
-        required=True,
-        max_length=500
-    )
+class GhiSeoModal(discord.ui.Modal, title="⚔️ GHI VI PHẠM"):
+    lydo = discord.ui.TextInput(label="Lỗi vi phạm", style=discord.TextStyle.paragraph)
 
     def __init__(self, member):
         super().__init__()
@@ -146,25 +143,24 @@ class GhiSeoModal(discord.ui.Modal, title="⚔️ GHI SẸO CIARA"):
         record = {
             "case": next_case(),
             "reason": self.lydo.value,
-            "by": interaction.user.name,
             "deadline": (datetime.now(VN_TZ) + timedelta(days=DEADLINE_DAYS)).isoformat(),
             "paid": False
         }
-
         u.append(record)
         save()
 
-        e = make_embed(
-            "⚔️ CIARA DISCIPLINE REPORT",
-            (
-                f"👤 {self.member.mention}\n"
-                f"🧾 `{record['case']}`\n"
-                f"📌 ```{record['reason']}```\n"
-                f"🚨 **{PENALTY.get(count,'—')}**\n"
-                f"{countdown(datetime.fromisoformat(record['deadline']))}"
-            ),
-            COLOR.get(min(count, 3), 0x992d22)
-        )
+        # ADD ROLE VI PHẠM
+        if VI_PHAM_ROLE_ID:
+            role = interaction.guild.get_role(VI_PHAM_ROLE_ID)
+            if role:
+                await self.member.add_roles(role, reason="Có vi phạm")
+
+        e = make_embed("🚨 VI PHẠM", COLOR.get(min(count, 3), 0x992d22))
+        e.add_field(name="👤 Người vi phạm", value=self.member.mention, inline=False)
+        e.add_field(name="📌 Lỗi vi phạm", value=f"```{record['reason']}```", inline=False)
+        e.add_field(name="⚠️ Mức kỷ luật", value=PENALTY.get(count, "—"), inline=False)
+        e.add_field(name="⏳ Thời hạn", value=countdown(datetime.fromisoformat(record["deadline"])), inline=True)
+        e.add_field(name="🧾 Mã bản án", value=record["case"], inline=True)
 
         await interaction.followup.send(
             content=f"@everyone ⚠️ {self.member.mention}",
@@ -180,27 +176,31 @@ async def ghiseo(interaction: discord.Interaction, member: discord.Member):
         return await interaction.response.send_message("❌ Admin only", ephemeral=True)
     await interaction.response.send_modal(GhiSeoModal(member))
 
-@bot.tree.command(name="xemseo")
-async def xemseo(interaction: discord.Interaction):
-    u = get_user(interaction.user.id)
-    if not u:
-        return await interaction.response.send_message("✨ Bạn sạch sẹo", ephemeral=True)
+@bot.tree.command(name="thongke")
+async def thongke(interaction: discord.Interaction, member: discord.Member | None = None):
+    member = member or interaction.user
+    u = get_user(member.id)
 
-    r = u[-1]
-    await interaction.response.send_message(
-        embed=make_embed(
-            "🧬 HỒ SƠ SẸO",
-            f"🧾 `{r['case']}`\n📌 ```{r['reason']}```",
-            COLOR.get(min(len(u), 3), 0x95a5a6)
-        ),
-        ephemeral=True
-    )
+    total = len(u)
+    unpaid = sum(1 for r in u if not r.get("paid"))
+    paid = total - unpaid
+
+    e = make_embed("📊 THỐNG KÊ VI PHẠM", 0x3498db)
+    e.add_field(name="👤 Thành viên", value=member.mention, inline=False)
+    e.add_field(name="📁 Tổng vi phạm", value=total)
+    e.add_field(name="✅ Đã đóng", value=paid)
+    e.add_field(name="❌ Chưa đóng", value=unpaid)
+
+    await interaction.response.send_message(embed=e, ephemeral=True)
 
 @bot.tree.command(name="datkenhlog")
-async def datkenhlog(interaction: discord.Interaction, kenh: discord.TextChannel):
+async def datkenhlog(interaction: discord.Interaction, kenh: discord.abc.GuildChannel):
     await interaction.response.defer(ephemeral=True)
     if not is_admin(interaction.user):
         return await interaction.followup.send("❌ Admin only")
+
+    if not isinstance(kenh, discord.TextChannel):
+        return await interaction.followup.send("❌ Chọn kênh text")
 
     data["config"]["log_channel"] = kenh.id
     save()
@@ -210,23 +210,15 @@ async def datkenhlog(interaction: discord.Interaction, kenh: discord.TextChannel
 async def resync(interaction: discord.Interaction):
     if not is_admin(interaction.user):
         return await interaction.response.send_message("❌ Admin only", ephemeral=True)
-
     await interaction.response.defer(ephemeral=True)
-    if GUILD_ID:
-        await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-    else:
-        await bot.tree.sync()
-
+    await bot.tree.sync()
     await interaction.followup.send("✅ Đã resync")
 
 # ================= READY =================
 @bot.event
 async def on_ready():
     try:
-        if GUILD_ID:
-            await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-        else:
-            await bot.tree.sync()
+        await bot.tree.sync()
         print("⚔️ CIARA BOT ONLINE")
     except Exception:
         traceback.print_exc()
