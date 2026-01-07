@@ -158,32 +158,34 @@ class ThongKeView(discord.ui.View):
         self.max_page = math.ceil(len(rows) / PER_PAGE)
 
     def build_embed(self):
-    start = self.page * PER_PAGE
-    end = start + PER_PAGE
+        start = self.page * PER_PAGE
+        end = start + PER_PAGE
 
-    e = make_embed(
-        f"📊 THỐNG KÊ VI PHẠM – Trang {self.page+1}/{self.max_page}",
-        0x3498db
-    )
-
-    for uid, total, unpaid, paid in self.rows[start:end]:
-        member = self.guild.get_member(uid)
-        name = member.display_name if member else f"User {uid}"
-
-        e.add_field(
-            name=name,
-            value=f"📁 {total} sẹo | ❌ {unpaid} | ✅ {paid}",
-            inline=False
+        e = make_embed(
+            f"📊 THỐNG KÊ VI PHẠM – Trang {self.page+1}/{self.max_page}",
+            0x3498db
         )
 
-    return e
+        for uid, total, unpaid, paid in self.rows[start:end]:
+            member = self.guild.get_member(uid)
+            name = member.display_name if member else f"User {uid}"
 
+            e.add_field(
+                name=name,
+                value=f"📁 {total} sẹo | ❌ {unpaid} | ✅ {paid}",
+                inline=False
+            )
+
+        return e
 
     @discord.ui.button(label="⬅️", style=discord.ButtonStyle.secondary)
     async def prev(self, interaction: discord.Interaction, _):
         if self.page > 0:
             self.page -= 1
-            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+            await interaction.response.edit_message(
+                embed=self.build_embed(),
+                view=self
+            )
         else:
             await interaction.response.defer()
 
@@ -191,9 +193,13 @@ class ThongKeView(discord.ui.View):
     async def next(self, interaction: discord.Interaction, _):
         if self.page < self.max_page - 1:
             self.page += 1
-            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+            await interaction.response.edit_message(
+                embed=self.build_embed(),
+                view=self
+            )
         else:
             await interaction.response.defer()
+
 
 # ================= MODAL =================
 class GhiSeoModal(discord.ui.Modal, title="🚨 GHI VI PHẠM"):
