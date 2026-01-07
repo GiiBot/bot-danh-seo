@@ -127,17 +127,16 @@ async def on_ready():
     try:
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
-            bot.tree.clear_commands(guild=guild)   # 🔥 CLEAR CACHE
-            await bot.tree.sync(guild=guild)       # 🔥 SYNC NGAY
-            print(f"🧹 Slash commands cleared & synced (Guild {GUILD_ID})")
+            await bot.tree.sync(guild=guild)
+            print(f"🟢 Slash commands synced to guild {GUILD_ID}")
         else:
-            bot.tree.clear_commands()
             await bot.tree.sync()
-            print("🧹 Slash commands cleared & synced (Global)")
-    except Exception:
-        traceback.print_exc()
+            print("🟢 Slash commands synced globally")
+    except Exception as e:
+        print("❌ SYNC ERROR:", e)
 
     print(f"🟢 CIARA SCAR BOT ONLINE: {bot.user}")
+
 
 @bot.event
 async def on_error(event, *args):
