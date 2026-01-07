@@ -265,6 +265,28 @@ async def resync(interaction: discord.Interaction):
     await interaction.followup.send("✅ Đã resync slash commands")
 
 # ================= READY =================
+@bot.tree.command(name="datkenhlog", description="Đặt kênh log cho CIARA")
+async def datkenhlog(interaction: discord.Interaction, kenh: discord.TextChannel):
+    try:
+        await interaction.response.defer(ephemeral=True)
+
+        if not is_admin(interaction.user):
+            return await interaction.followup.send("❌ Admin only")
+
+        data["config"]["log_channel"] = kenh.id
+        save()
+
+        await interaction.followup.send(
+            f"✅ Đã đặt kênh log thành công: {kenh.mention}"
+        )
+
+    except Exception as e:
+        print("❌ datkenhlog error:", e)
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                "❌ Bot gặp lỗi nội bộ", ephemeral=True
+            )
+
 @bot.event
 async def on_ready():
     try:
