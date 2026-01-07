@@ -258,15 +258,17 @@ async def thongke(interaction: discord.Interaction):
     view = ThongKeView(rows, interaction.guild)
     await interaction.response.send_message(embed=view.build_embed(), view=view, ephemeral=True)
 
-@bot.tree.command(name="topseo")
+@bot.tree.command(name="topseo", description="Bảng xếp hạng vi phạm CIARA")
 async def topseo(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
 
     ranking = []
     for uid, records in data["users"].items():
-        if records:
-            unpaid = sum(1 for r in records if not r.get("paid"))
-            ranking.append((int(uid), len(records), unpaid))
+        total = len(records)
+        if total == 0:
+            continue
+        unpaid = sum(1 for r in records if not r.get("paid"))
+        ranking.append((int(uid), total, unpaid, total - unpaid))
 
     if not ranking:
         return await interaction.followup.send("✨ Chưa có vi phạm nào")
@@ -274,20 +276,33 @@ async def topseo(interaction: discord.Interaction):
     ranking.sort(key=lambda x: x[1], reverse=True)
     ranking = ranking[:10]
 
-    e = make_embed("🏆 TOP VI PHẠM CIARA", 0xe67e22)
+    e = discord.Embed(
+        title="🏆 TOP VI PHẠM CIARA",
+        color=0xe67e22,
+        timestamp=datetime.now(VN_TZ)
+    )
+    e.set_footer(text=FOOTER, icon_url=ICON)
+
     medals = ["🥇", "🥈", "🥉"]
 
-    for i, (uid, total, unpaid) in enumerate(ranking):
+    for i, (uid, total, unpaid, paid) in enumerate(ranking):
         member = interaction.guild.get_member(uid)
-        name = member.mention if member else f"<@{uid}>"
+
+        name = member.display_name if member else f"User {uid}"
         rank = medals[i] if i < 3 else f"#{i+1}"
+
         e.add_field(
             name=f"{rank} {name}",
-            value=f"📁 {total} sẹo | ❌ {unpaid} | ✅ {total - unpaid}",
+            value=(
+                f"📁 **Tổng sẹo:** {total}\n"
+                f"❌ **Chưa đóng:** {unpaid}\n"
+                f"✅ **Đã đóng:** {paid}"
+            ),
             inline=False
         )
 
     await interaction.followup.send(embed=e)
+
 
 @bot.tree.command(name="datkenhlog")
 async def datkenhlog(interaction: discord.Interaction, kenh: discord.abc.GuildChannel):
