@@ -334,6 +334,22 @@ async def lichsuadmin(interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ================= READY =================
+@bot.tree.command(name="datkenhlog", description="📥 Đặt kênh log sẹo")
+async def datkenhlog(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not is_admin(interaction.user):
+        return await interaction.response.send_message(
+            "❌ Chỉ Admin mới dùng được lệnh này",
+            ephemeral=True
+        )
+
+    data["config"]["log_channel"] = channel.id
+    save(data)
+
+    await interaction.response.send_message(
+        f"✅ Đã đặt kênh log sẹo: {channel.mention}",
+        ephemeral=True
+    )
+
 @bot.event
 async def on_ready():
     if GUILD_ID:
