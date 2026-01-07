@@ -56,7 +56,7 @@ def next_case_id():
 
 # ================= HELPERS =================
 def is_admin(member: discord.Member):
-    return any(r.name == data["config"]["admin_role"] for r in member.roles)
+    return member.guild_permissions.administrator
 
 def get_user(uid):
     uid = str(uid)
