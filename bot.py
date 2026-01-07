@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from datetime import datetime, timedelta, timezone
-import json, os, traceback
+import json, os, math, traceback
 
 # ================= ENV =================
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -11,6 +11,7 @@ VI_PHAM_ROLE_ID = int(os.getenv("VI_PHAM_ROLE_ID", "0"))
 DATA_FILE = "data.json"
 VN_TZ = timezone(timedelta(hours=7))
 DEADLINE_DAYS = 7
+PER_PAGE = 10
 
 # ================= THEME =================
 COLOR = {1: 0xFF6B6B, 2: 0xFF4757, 3: 0xC0392B}
@@ -86,8 +87,24 @@ async def send_log(embed):
         ch = bot.get_channel(cid)
         if ch and ch.permissions_for(ch.guild.me).send_messages:
             await ch.send(embed=embed)
-    except Exception as e:
-        print("LOG ERROR:", e)
+    except:
+        pass
+
+async def send_dm_violation(member, record, count):
+    try:
+        e = discord.Embed(
+            title="🚨 THÔNG BÁO VI PHẠM",
+            color=COLOR.get(min(count, 3), 0x992d22),
+            timestamp=datetime.now(VN_TZ)
+        )
+        e.add_field(name="📌 Lỗi vi phạm", value=f"```{record['reason']}```", inline=False)
+        e.add_field(name="⚠️ Mức kỷ luật", value=PENALTY.get(count, "—"), inline=False)
+        e.add_field(name="⏳ Thời hạn", value=countdown(datetime.fromisoformat(record["deadline"])), inline=True)
+        e.add_field(name="🧾 Mã bản án", value=record["case"], inline=True)
+        e.set_footer(text=FOOTER, icon_url=ICON)
+        await member.send(embed=e)
+    except:
+        pass
 
 # ================= FAIL SAFE =================
 @bot.tree.error
@@ -117,17 +134,64 @@ class ConfirmView(discord.ui.View):
         self.record["paid"] = True
         self.record["paid_at"] = datetime.now(VN_TZ).isoformat()
         save()
-
         button.disabled = True
+
+        try:
+            await self.member.send(
+                f"✅ **XÁC NHẬN HOÀN TẤT**\n🧾 Bản án `{self.record['case']}` đã được xác nhận **ĐÃ ĐÓNG**."
+            )
+        except:
+            pass
 
         e = make_embed("✅ XÁC NHẬN ĐÃ ĐÓNG", 0x2ecc71)
         e.add_field(name="👤 Thành viên", value=self.member.mention, inline=False)
-
         await interaction.response.edit_message(embed=e, view=self)
         await send_log(e)
 
+# ================= THONGKE VIEW (PAGINATION) =================
+class ThongKeView(discord.ui.View):
+    def __init__(self, rows, guild):
+        super().__init__(timeout=120)
+        self.rows = rows
+        self.guild = guild
+        self.page = 0
+        self.max_page = math.ceil(len(rows) / PER_PAGE)
+
+    def build_embed(self):
+        start = self.page * PER_PAGE
+        end = start + PER_PAGE
+        e = make_embed(
+            f"📊 THỐNG KÊ VI PHẠM – Trang {self.page+1}/{self.max_page}",
+            0x3498db
+        )
+        for uid, total, unpaid, paid in self.rows[start:end]:
+            member = self.guild.get_member(uid)
+            name = member.mention if member else f"<@{uid}>"
+            e.add_field(
+                name=name,
+                value=f"📁 {total} sẹo | ❌ {unpaid} | ✅ {paid}",
+                inline=False
+            )
+        return e
+
+    @discord.ui.button(label="⬅️", style=discord.ButtonStyle.secondary)
+    async def prev(self, interaction: discord.Interaction, _):
+        if self.page > 0:
+            self.page -= 1
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+        else:
+            await interaction.response.defer()
+
+    @discord.ui.button(label="➡️", style=discord.ButtonStyle.secondary)
+    async def next(self, interaction: discord.Interaction, _):
+        if self.page < self.max_page - 1:
+            self.page += 1
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+        else:
+            await interaction.response.defer()
+
 # ================= MODAL =================
-class GhiSeoModal(discord.ui.Modal, title="⚔️ GHI VI PHẠM"):
+class GhiSeoModal(discord.ui.Modal, title="🚨 GHI VI PHẠM"):
     lydo = discord.ui.TextInput(label="Lỗi vi phạm", style=discord.TextStyle.paragraph)
 
     def __init__(self, member):
@@ -149,11 +213,12 @@ class GhiSeoModal(discord.ui.Modal, title="⚔️ GHI VI PHẠM"):
         u.append(record)
         save()
 
-        # ADD ROLE VI PHẠM
         if VI_PHAM_ROLE_ID:
             role = interaction.guild.get_role(VI_PHAM_ROLE_ID)
             if role:
                 await self.member.add_roles(role, reason="Có vi phạm")
+
+        await send_dm_violation(self.member, record, count)
 
         e = make_embed("🚨 VI PHẠM", COLOR.get(min(count, 3), 0x992d22))
         e.add_field(name="👤 Người vi phạm", value=self.member.mention, inline=False)
@@ -176,56 +241,59 @@ async def ghiseo(interaction: discord.Interaction, member: discord.Member):
         return await interaction.response.send_message("❌ Admin only", ephemeral=True)
     await interaction.response.send_modal(GhiSeoModal(member))
 
-@bot.tree.command(name="thongke")
-async def thongke(interaction: discord.Interaction, member: discord.Member | None = None):
-    member = member or interaction.user
-    u = get_user(member.id)
-
-    total = len(u)
-    unpaid = sum(1 for r in u if not r.get("paid"))
-    paid = total - unpaid
-
-    e = make_embed("📊 THỐNG KÊ VI PHẠM", 0x3498db)
-    e.add_field(name="👤 Thành viên", value=member.mention, inline=False)
-    e.add_field(name="📁 Tổng vi phạm", value=total)
-    e.add_field(name="✅ Đã đóng", value=paid)
-    e.add_field(name="❌ Chưa đóng", value=unpaid)
-
-    await interaction.response.send_message(embed=e, ephemeral=True)
-@bot.tree.command(name="topseo", description="Xem bảng xếp hạng vi phạm CIARA")
-async def topseo(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-
-    ranking = []
-
+@bot.tree.command(name="thongke", description="Thống kê tất cả người bị sẹo")
+async def thongke(interaction: discord.Interaction):
+    rows = []
     for uid, records in data["users"].items():
         total = len(records)
         if total == 0:
             continue
-
         unpaid = sum(1 for r in records if not r.get("paid"))
-        ranking.append((int(uid), total, unpaid))
+        rows.append((int(uid), total, unpaid, total - unpaid))
+
+    if not rows:
+        return await interaction.response.send_message("✨ Chưa có ai bị sẹo", ephemeral=True)
+
+    rows.sort(key=lambda x: x[1], reverse=True)
+    view = ThongKeView(rows, interaction.guild)
+    await interaction.response.send_message(embed=view.build_embed(), view=view, ephemeral=True)
+
+@bot.tree.command(name="topseo")
+async def topseo(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    ranking = []
+    for uid, records in data["users"].items():
+        if records:
+            unpaid = sum(1 for r in records if not r.get("paid"))
+            ranking.append((int(uid), len(records), unpaid))
 
     if not ranking:
-        return await interaction.followup.send("✨ Hiện chưa có vi phạm nào")
+        return await interaction.followup.send("✨ Chưa có vi phạm nào")
 
-    # Sắp xếp theo số sẹo giảm dần
     ranking.sort(key=lambda x: x[1], reverse=True)
     ranking = ranking[:10]
 
     e = make_embed("🏆 TOP VI PHẠM CIARA", 0xe67e22)
-
     medals = ["🥇", "🥈", "🥉"]
 
     for i, (uid, total, unpaid) in enumerate(ranking):
-        member = int
+        member = interaction.guild.get_member(uid)
+        name = member.mention if member else f"<@{uid}>"
+        rank = medals[i] if i < 3 else f"#{i+1}"
+        e.add_field(
+            name=f"{rank} {name}",
+            value=f"📁 {total} sẹo | ❌ {unpaid} | ✅ {total - unpaid}",
+            inline=False
+        )
+
+    await interaction.followup.send(embed=e)
 
 @bot.tree.command(name="datkenhlog")
 async def datkenhlog(interaction: discord.Interaction, kenh: discord.abc.GuildChannel):
     await interaction.response.defer(ephemeral=True)
     if not is_admin(interaction.user):
         return await interaction.followup.send("❌ Admin only")
-
     if not isinstance(kenh, discord.TextChannel):
         return await interaction.followup.send("❌ Chọn kênh text")
 
@@ -237,16 +305,19 @@ async def datkenhlog(interaction: discord.Interaction, kenh: discord.abc.GuildCh
 async def resync(interaction: discord.Interaction):
     if not is_admin(interaction.user):
         return await interaction.response.send_message("❌ Admin only", ephemeral=True)
-    await interaction.response.defer(ephemeral=True)
-    await bot.tree.sync()
-    await interaction.followup.send("✅ Đã resync")
+
+    await interaction.response.send_message("🔄 Đang resync lệnh cho server...", ephemeral=True)
+    guild = discord.Object(id=interaction.guild.id)
+    synced = await bot.tree.sync(guild=guild)
+    await interaction.followup.send(f"✅ Resync xong – {len(synced)} lệnh", ephemeral=True)
 
 # ================= READY =================
 @bot.event
 async def on_ready():
     try:
-        await bot.tree.sync()
-        print("⚔️ CIARA BOT ONLINE")
+        guild = discord.Object(id=GUILD_ID)
+        synced = await bot.tree.sync(guild=guild)
+        print(f"⚔️ CIARA BOT ONLINE | {len(synced)} slash commands")
     except Exception:
         traceback.print_exc()
 
