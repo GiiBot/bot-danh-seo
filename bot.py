@@ -94,7 +94,7 @@ def build_embed(member, record, total):
     note = record.get("paid_note", "—")
 
     embed.add_field(
-        name="🚨 HÌNH PHẠT RP",
+        name="🚨 HÌNH PHẠT CREW",
         value=f"⚠️ **{penalty}**\n🧾 Trạng thái: {status}\n💰 Ghi chú: **{note}**",
         inline=False
     )
