@@ -1,12 +1,15 @@
 {
   "config": {
-    "log_channel": null,
+    "log_channel": 123456789,
     "scar_roles": {
       "1": "Sẹo 1",
       "2": "Sẹo 2",
       "3": "Sẹo 3"
     }
   },
-  "case_id": 0,
-  "users": {}
+  "case_id": 12,
+  "users": {
+    "111111111": []
+  },
+  "admin_logs": []
 }
