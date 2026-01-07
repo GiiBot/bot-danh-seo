@@ -241,22 +241,56 @@ async def ghiseo(interaction: discord.Interaction, member: discord.Member):
         return await interaction.response.send_message("❌ Admin only", ephemeral=True)
     await interaction.response.send_modal(GhiSeoModal(member))
 
-@bot.tree.command(name="thongke", description="Thống kê tất cả người bị sẹo")
+@bot.tree.command(name="thongke", description="Thống kê tổng toàn bộ người bị sẹo")
 async def thongke(interaction: discord.Interaction):
     rows = []
+    total_users = 0
+    total_seo = 0
+    total_unpaid = 0
+    total_paid = 0
+
     for uid, records in data["users"].items():
         total = len(records)
         if total == 0:
             continue
+
         unpaid = sum(1 for r in records if not r.get("paid"))
-        rows.append((int(uid), total, unpaid, total - unpaid))
+        paid = total - unpaid
+
+        rows.append((int(uid), total, unpaid, paid))
+
+        total_users += 1
+        total_seo += total
+        total_unpaid += unpaid
+        total_paid += paid
 
     if not rows:
-        return await interaction.response.send_message("✨ Chưa có ai bị sẹo", ephemeral=True)
+        return await interaction.response.send_message(
+            "✨ Hiện tại **không có ai bị sẹo**",
+            ephemeral=True
+        )
 
+    # Sắp xếp nhiều sẹo → ít sẹo
     rows.sort(key=lambda x: x[1], reverse=True)
+
     view = ThongKeView(rows, interaction.guild)
-    await interaction.response.send_message(embed=view.build_embed(), view=view, ephemeral=True)
+    embed = view.build_embed()
+
+    # 🔥 PHẦN THỐNG KÊ TỔNG (HEADER)
+    embed.title = "📊 THỐNG KÊ VI PHẠM TOÀN SERVER"
+    embed.description = (
+        f"👥 **Người bị sẹo:** {total_users}\n"
+        f"📁 **Tổng sẹo:** {total_seo}\n"
+        f"❌ **Chưa đóng:** {total_unpaid}\n"
+        f"✅ **Đã đóng:** {total_paid}"
+    )
+
+    await interaction.response.send_message(
+        embed=embed,
+        view=view,
+        ephemeral=True
+    )
+
 
 @bot.tree.command(name="topseo", description="Bảng xếp hạng vi phạm CIARA")
 async def topseo(interaction: discord.Interaction):
