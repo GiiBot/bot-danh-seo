@@ -1,7 +1,8 @@
 import discord
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta, timezone
-import json, os
+import json
+import os
 
 # ================= ENV =================
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -10,48 +11,75 @@ DATA_FILE = "data.json"
 VN_TZ = timezone(timedelta(hours=7))
 DEADLINE_DAYS = 7
 
-# ================= THEME =================
-COLOR = {1: 0x8B0000, 2: 0xB30000, 3: 0x0F0F0F}
+# ================= THEME - FIXED =================
+COLOR = {
+    1: 0xFF6B6B,  # Đỏ nhạt - cảnh cáo đầu
+    2: 0xFF4757,  # Đỏ vừa - cảnh cáo lần 2
+    3: 0xEE5A6F   # Đỏ đậm - nghiêm trọng
+}
 FOOTER = "⚔️ LORD OF CIARA | KỶ LUẬT TẠO SỨC MẠNH"
-ICON = "https://cdn-icons-png.flaticon.com/512/1695/1695213.png"
+# Icon kiếm hợp lệ từ CDN
+ICON = "https://cdn.discordapp.com/attachments/1234567890/sword-icon.png"
+# Banner gif cho embed
+BANNER = "https://i.imgur.com/sword-animation.gif"
 
 # ================= PENALTY =================
 PENALTY = {
-    1: "Cảnh cáo",
-    2: "Đóng quỹ 500k IG",
-    3: "Đóng quỹ 1.000.000 IG",
-    5: "Kick khỏi crew",
-    7: "Ban vĩnh viễn"
+    1: "⚠️ Cảnh cáo lần 1",
+    2: "💰 Đóng quỹ 500.000 VNĐ",
+    3: "💸 Đóng quỹ 1.000.000 VNĐ",
+    4: "🚨 Cảnh cáo nghiêm khắc",
+    5: "👢 Kick khỏi crew",
+    6: "🔨 Ban tạm thời",
+    7: "⛔ Ban vĩnh viễn"
 }
 
-# ================= BOT =================
+# ================= BOT SETUP =================
 intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True
+intents.message_content = True
+
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ================= DATA =================
+# ================= DATA MANAGEMENT =================
 def load():
     if not os.path.exists(DATA_FILE):
+        return {
+            "config": {"log_channel": None}, 
+            "case_id": 0, 
+            "users": {}, 
+            "admin_logs": []
+        }
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"❌ Lỗi load data: {e}")
         return {"config": {"log_channel": None}, "case_id": 0, "users": {}, "admin_logs": []}
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
 
 def save():
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    try:
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"❌ Lỗi save data: {e}")
 
 data = load()
 
 # ================= UTILS =================
-def is_admin(m): return m.guild_permissions.administrator
+def is_admin(member):
+    """Check nếu user là admin"""
+    return member.guild_permissions.administrator
 
 def next_case():
+    """Tạo case ID mới"""
     data["case_id"] += 1
     save()
     return f"#{data['case_id']:04d}"
 
 def get_user(uid):
+    """Lấy thông tin user từ database"""
     uid = str(uid)
     if uid not in data["users"]:
         data["users"][uid] = []
@@ -59,22 +87,31 @@ def get_user(uid):
     return data["users"][uid]
 
 def countdown(deadline):
+    """Tính thời gian còn lại"""
     now = datetime.now(VN_TZ)
     diff = deadline - now
     if diff.total_seconds() <= 0:
-        return "🔴 **QUÁ HẠN**"
+        return "🔴 **ĐÃ QUÁ HẠN**"
     d = diff.days
     h = diff.seconds // 3600
-    return f"⏳ Còn **{d} ngày {h} giờ**"
+    m = (diff.seconds % 3600) // 60
+    return f"⏳ Còn **{d} ngày {h} giờ {m} phút**"
 
 def ciara_embed(title, desc, color):
-    e = discord.Embed(title=title, description=desc, color=color)
+    """Tạo embed với theme CIARA"""
+    e = discord.Embed(
+        title=f"# {title}",  # Font to hơn
+        description=desc,
+        color=color,
+        timestamp=datetime.now(VN_TZ)
+    )
     e.set_footer(text=FOOTER, icon_url=ICON)
     return e
 
 # ================= AUTO PING TASK =================
 @tasks.loop(hours=6)
 async def auto_ping_unpaid():
+    """Tự động nhắc nhở người chưa đóng phạt"""
     guild = bot.get_guild(GUILD_ID)
     if not guild:
         return
@@ -83,136 +120,372 @@ async def auto_ping_unpaid():
         member = guild.get_member(int(uid))
         if not member:
             continue
+        
         for r in records:
             if not r["paid"]:
-                deadline = datetime.fromisoformat(r["deadline"])
-                if (deadline - datetime.now(VN_TZ)).days <= 1:
-                    try:
+                try:
+                    deadline = datetime.fromisoformat(r["deadline"])
+                    time_left = deadline - datetime.now(VN_TZ)
+                    
+                    # Chỉ ping nếu còn dưới 24 giờ
+                    if 0 < time_left.total_seconds() < 86400:
                         await member.send(
-                            f"🔔 **NHẮC ĐÓNG PHẠT CIARA**\n"
-                            f"🧾 Case `{r['case']}`\n"
-                            f"{countdown(deadline)}"
+                            f"# 🔔 NHẮC NHỞ ĐÓNG PHẠT\n\n"
+                            f"📋 **Case:** `{r['case']}`\n"
+                            f"📌 **Lý do:** {r['reason']}\n"
+                            f"{countdown(deadline)}\n\n"
+                            f"⚠️ *Vui lòng liên hệ Admin để xác nhận thanh toán!*"
                         )
-                    except:
-                        pass
+                except Exception as e:
+                    print(f"❌ Lỗi ping user {uid}: {e}")
 
-# ================= VIEW CONFIRM =================
+@auto_ping_unpaid.before_loop
+async def before_auto_ping():
+    await bot.wait_until_ready()
+
+# ================= CONFIRM VIEW =================
 class ConfirmPaidView(discord.ui.View):
     def __init__(self, member, record):
-        super().__init__(timeout=60)
+        super().__init__(timeout=300)  # 5 phút timeout
         self.member = member
         self.record = record
 
-    @discord.ui.button(label="✅ ĐÃ ĐÓNG", style=discord.ButtonStyle.success)
-    async def confirm(self, interaction, _):
+    @discord.ui.button(label="✅ XÁC NHẬN ĐÃ ĐÓNG", style=discord.ButtonStyle.success, emoji="💰")
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_admin(interaction.user):
-            return await interaction.response.send_message("❌ Admin only", ephemeral=True)
+            return await interaction.response.send_message("❌ Chỉ Admin mới có quyền này!", ephemeral=True)
+        
         self.record["paid"] = True
-        self.record["paid_note"] = "Đã đóng đủ"
+        self.record["paid_at"] = datetime.now(VN_TZ).isoformat()
+        self.record["paid_by"] = interaction.user.name
+        self.record["paid_note"] = "Đã xác nhận thanh toán đầy đủ"
         save()
+        
+        embed = ciara_embed(
+            "✅ HOÀN TẤT THANH TOÁN",
+            f"## {self.member.mention} đã hoàn thành hình phạt!\n\n"
+            f"📋 **Case:** `{self.record['case']}`\n"
+            f"✅ **Xác nhận bởi:** {interaction.user.mention}\n"
+            f"📅 **Thời gian:** {datetime.now(VN_TZ).strftime('%d/%m/%Y %H:%M')}",
+            0x27AE60
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=None)
+        
+        # Gửi DM cho member
+        try:
+            await self.member.send(
+                f"# ✅ THANH TOÁN THÀNH CÔNG\n\n"
+                f"Hình phạt `{self.record['case']}` của bạn đã được xác nhận thanh toán!\n"
+                f"Cảm ơn bạn đã tuân thủ kỷ luật crew."
+            )
+        except:
+            pass
+
+    @discord.ui.button(label="❌ HỦY BỎ", style=discord.ButtonStyle.danger, emoji="🚫")
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(
-            embed=ciara_embed(
-                "✅ ĐÃ XÁC NHẬN ĐÓNG PHẠT",
-                f"{self.member.mention} đã hoàn tất hình phạt RP",
-                0x27ae60
-            ),
+            content="❌ Đã hủy xác nhận thanh toán",
+            embed=None,
             view=None
         )
 
-    @discord.ui.button(label="❌ HỦY", style=discord.ButtonStyle.danger)
-    async def cancel(self, interaction, _):
-        await interaction.response.edit_message(content="❌ Đã hủy", view=None)
+# ================= SLASH COMMANDS =================
 
-# ================= COMMANDS =================
-@bot.tree.command(name="ghiseo")
-async def ghiseo(interaction, member: discord.Member):
+@bot.tree.command(name="ghiseo", description="⚔️ Ghi sẹo vi phạm cho thành viên")
+async def ghiseo(interaction: discord.Interaction, member: discord.Member, lydo: str):
+    """
+    Ghi nhận vi phạm cho thành viên
+    
+    Parameters:
+    -----------
+    member: Thành viên vi phạm
+    lydo: Lý do vi phạm
+    """
     if not is_admin(interaction.user):
-        return await interaction.response.send_message("❌ Admin only", ephemeral=True)
+        return await interaction.response.send_message("❌ Chỉ Admin mới có quyền sử dụng lệnh này!", ephemeral=True)
 
-    modal = discord.ui.Modal(title="⚔️ GHI SẸO CIARA")
-    lydo = discord.ui.TextInput(label="Lý do vi phạm", style=discord.TextStyle.paragraph)
-    modal.add_item(lydo)
+    # Tạo record mới
+    user_records = get_user(member.id)
+    violation_count = len(user_records) + 1
+    
+    record = {
+        "case": next_case(),
+        "reason": lydo,
+        "by": interaction.user.name,
+        "created_at": datetime.now(VN_TZ).isoformat(),
+        "deadline": (datetime.now(VN_TZ) + timedelta(days=DEADLINE_DAYS)).isoformat(),
+        "paid": False,
+        "paid_note": "",
+        "violation_number": violation_count
+    }
+    
+    user_records.append(record)
+    save()
 
-    async def on_submit(i):
-        record = {
-            "case": next_case(),
-            "reason": lydo.value,
-            "by": i.user.name,
-            "created_at": datetime.now(VN_TZ).isoformat(),
-            "deadline": (datetime.now(VN_TZ) + timedelta(days=DEADLINE_DAYS)).isoformat(),
-            "paid": False,
-            "paid_note": ""
-        }
-        get_user(member.id).append(record)
-        save()
-
-        embed = ciara_embed(
-            "⚔️ CIARA DISCIPLINE REPORT",
-            f"👤 {member.mention}\n🧾 `{record['case']}`\n"
-            f"📌 ```{record['reason']}```\n"
-            f"🚨 **{PENALTY.get(len(get_user(member.id)), '—')}**\n"
-            f"{countdown(datetime.fromisoformat(record['deadline']))}",
-            COLOR.get(min(len(get_user(member.id)), 3))
-        )
-        await i.response.send_message(f"@everyone ⚠️ {member.mention}", embed=embed)
-
-    modal.on_submit = on_submit
-    await interaction.response.send_modal(modal)
-
-@bot.tree.command(name="xemseo")
-async def xemseo(interaction):
-    u = get_user(interaction.user.id)
-    if not u:
-        return await interaction.response.send_message("✨ Bạn sạch sẹo", ephemeral=True)
-    r = u[-1]
+    # Tạo embed thông báo
+    penalty_text = PENALTY.get(violation_count, "⛔ Xử lý đặc biệt")
+    color = COLOR.get(min(violation_count, 3), 0xFF0000)
+    
     embed = ciara_embed(
-        "🧬 HỒ SƠ SẸO",
-        f"🧾 `{r['case']}`\n📌 ```{r['reason']}```\n"
-        f"{countdown(datetime.fromisoformat(r['deadline']))}",
-        COLOR.get(min(len(u), 3))
+        "⚔️ CIARA DISCIPLINE REPORT",
+        f"## 👤 Thành viên: {member.mention}\n\n"
+        f"📋 **Case ID:** `{record['case']}`\n"
+        f"🔢 **Vi phạm lần:** {violation_count}\n"
+        f"📌 **Lý do:**\n```\n{record['reason']}\n```\n"
+        f"🚨 **Hình phạt:** {penalty_text}\n"
+        f"👮 **Ghi nhận bởi:** {interaction.user.mention}\n"
+        f"📅 **Hạn đóng phạt:** {datetime.fromisoformat(record['deadline']).strftime('%d/%m/%Y %H:%M')}\n\n"
+        f"{countdown(datetime.fromisoformat(record['deadline']))}",
+        color
     )
+    
+    await interaction.response.send_message(
+        content=f"@everyone\n# ⚠️ THÔNG BÁO VI PHẠM\n{member.mention}",
+        embed=embed
+    )
+    
+    # Gửi DM cho member
+    try:
+        await member.send(
+            f"# ⚠️ THÔNG BÁO VI PHẠM CIARA\n\n"
+            f"Bạn đã nhận được cảnh cáo vi phạm:\n\n"
+            f"📋 **Case:** `{record['case']}`\n"
+            f"📌 **Lý do:** {record['reason']}\n"
+            f"🚨 **Hình phạt:** {penalty_text}\n"
+            f"📅 **Hạn thanh toán:** {datetime.fromisoformat(record['deadline']).strftime('%d/%m/%Y %H:%M')}\n\n"
+            f"Vui lòng liên hệ Admin để thanh toán trước hạn!"
+        )
+    except:
+        pass
+
+@bot.tree.command(name="xemseo", description="🔍 Xem sẹo vi phạm của bạn")
+async def xemseo(interaction: discord.Interaction, member: discord.Member = None):
+    """
+    Xem lịch sử vi phạm
+    
+    Parameters:
+    -----------
+    member: (Optional) Thành viên cần xem (Admin only)
+    """
+    # Nếu không chỉ định member, xem của chính mình
+    target = member if member and is_admin(interaction.user) else interaction.user
+    
+    user_records = get_user(target.id)
+    
+    if not user_records:
+        return await interaction.response.send_message(
+            f"✨ {'Thành viên này' if member else 'Bạn'} không có vi phạm nào!",
+            ephemeral=True
+        )
+    
+    # Tạo danh sách vi phạm
+    violations_text = ""
+    unpaid_count = 0
+    
+    for idx, r in enumerate(user_records, 1):
+        status = "✅ Đã đóng" if r["paid"] else "❌ Chưa đóng"
+        if not r["paid"]:
+            unpaid_count += 1
+        
+        violations_text += (
+            f"\n### {idx}. `{r['case']}` {status}\n"
+            f"📌 {r['reason']}\n"
+            f"📅 {datetime.fromisoformat(r['created_at']).strftime('%d/%m/%Y')}\n"
+        )
+    
+    color = COLOR.get(min(len(user_records), 3), 0x3498DB)
+    
+    embed = ciara_embed(
+        f"🧬 HỒ SƠ VI PHẠM - {target.display_name}",
+        f"## Tổng quan\n"
+        f"📊 **Tổng vi phạm:** {len(user_records)}\n"
+        f"❌ **Chưa thanh toán:** {unpaid_count}\n"
+        f"✅ **Đã thanh toán:** {len(user_records) - unpaid_count}\n\n"
+        f"## Chi tiết vi phạm\n{violations_text}",
+        color
+    )
+    
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="xacnhanphat")
-async def xacnhanphat(interaction, member: discord.Member):
+@bot.tree.command(name="xacnhanphat", description="💰 Xác nhận thành viên đã đóng phạt")
+async def xacnhanphat(interaction: discord.Interaction, member: discord.Member):
+    """
+    Xác nhận thanh toán phạt
+    
+    Parameters:
+    -----------
+    member: Thành viên cần xác nhận
+    """
     if not is_admin(interaction.user):
-        return await interaction.response.send_message("❌ Admin only", ephemeral=True)
-    u = get_user(member.id)
-    if not u:
-        return await interaction.response.send_message("⚠️ Không có sẹo", ephemeral=True)
+        return await interaction.response.send_message("❌ Chỉ Admin mới có quyền sử dụng lệnh này!", ephemeral=True)
+    
+    user_records = get_user(member.id)
+    
+    if not user_records:
+        return await interaction.response.send_message("⚠️ Thành viên này không có vi phạm nào!", ephemeral=True)
+    
+    # Tìm vi phạm chưa thanh toán
+    unpaid = [r for r in user_records if not r["paid"]]
+    
+    if not unpaid:
+        return await interaction.response.send_message("✅ Thành viên này đã thanh toán hết!", ephemeral=True)
+    
+    latest_unpaid = unpaid[-1]
+    
+    embed = ciara_embed(
+        "💰 XÁC NHẬN THANH TOÁN",
+        f"## {member.mention}\n\n"
+        f"📋 **Case:** `{latest_unpaid['case']}`\n"
+        f"📌 **Lý do:** {latest_unpaid['reason']}\n"
+        f"📅 **Hạn:** {datetime.fromisoformat(latest_unpaid['deadline']).strftime('%d/%m/%Y %H:%M')}\n\n"
+        f"⚠️ Vui lòng xác nhận đã nhận đủ tiền phạt!",
+        0xF1C40F
+    )
+    
     await interaction.response.send_message(
-        embed=ciara_embed("XÁC NHẬN ĐÓNG PHẠT", f"{member.mention}", 0xf1c40f),
-        view=ConfirmPaidView(member, u[-1])
+        embed=embed,
+        view=ConfirmPaidView(member, latest_unpaid)
     )
 
-@bot.tree.command(name="dashboard")
-async def dashboard(interaction):
+@bot.tree.command(name="dashboard", description="📊 Xem thống kê tổng quan")
+async def dashboard(interaction: discord.Interaction):
+    """Xem dashboard tổng quan của crew"""
+    
     total_case = sum(len(v) for v in data["users"].values())
     unpaid = sum(1 for v in data["users"].values() for r in v if not r["paid"])
+    paid = total_case - unpaid
+    total_members = len(data["users"])
+    
+    # Top vi phạm
+    top_violators = sorted(
+        data["users"].items(),
+        key=lambda x: len(x[1]),
+        reverse=True
+    )[:5]
+    
+    top_text = ""
+    for uid, records in top_violators:
+        try:
+            member = await interaction.guild.fetch_member(int(uid))
+            top_text += f"• {member.mention}: **{len(records)}** vi phạm\n"
+        except:
+            top_text += f"• User {uid}: **{len(records)}** vi phạm\n"
+    
     embed = ciara_embed(
         "📊 DASHBOARD CIARA",
-        f"📁 Tổng case: **{total_case}**\n"
-        f"❌ Chưa đóng phạt: **{unpaid}**",
-        0x3498db
+        f"## Thống kê tổng quan\n\n"
+        f"👥 **Tổng thành viên có hồ sơ:** {total_members}\n"
+        f"📁 **Tổng số case:** {total_case}\n"
+        f"✅ **Đã thanh toán:** {paid}\n"
+        f"❌ **Chưa thanh toán:** {unpaid}\n"
+        f"📈 **Tỷ lệ tuân thủ:** {(paid/total_case*100 if total_case > 0 else 0):.1f}%\n\n"
+        f"## 🏆 Top vi phạm nhiều nhất\n{top_text if top_text else '*Chưa có dữ liệu*'}",
+        0x3498DB
     )
+    
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="resync")
-async def resync(interaction):
+@bot.tree.command(name="xoaseo", description="🗑️ Xóa một sẹo vi phạm")
+async def xoaseo(interaction: discord.Interaction, member: discord.Member, case_id: str):
+    """
+    Xóa vi phạm (Admin only)
+    
+    Parameters:
+    -----------
+    member: Thành viên
+    case_id: Mã case cần xóa (vd: #0001)
+    """
     if not is_admin(interaction.user):
-        return await interaction.response.send_message("❌ Admin only", ephemeral=True)
-    guild = discord.Object(id=GUILD_ID)
-    bot.tree.clear_commands(guild=guild)
-    await bot.tree.sync(guild=guild)
-    await interaction.response.send_message("✅ Đã resync", ephemeral=True)
+        return await interaction.response.send_message("❌ Chỉ Admin mới có quyền sử dụng lệnh này!", ephemeral=True)
+    
+    user_records = get_user(member.id)
+    
+    # Tìm và xóa case
+    for i, r in enumerate(user_records):
+        if r["case"] == case_id:
+            deleted = user_records.pop(i)
+            save()
+            
+            embed = ciara_embed(
+                "🗑️ ĐÃ XÓA VI PHẠM",
+                f"## {member.mention}\n\n"
+                f"📋 **Case:** `{deleted['case']}`\n"
+                f"📌 **Lý do:** {deleted['reason']}\n"
+                f"👮 **Xóa bởi:** {interaction.user.mention}",
+                0xE74C3C
+            )
+            
+            return await interaction.response.send_message(embed=embed)
+    
+    await interaction.response.send_message(f"❌ Không tìm thấy case `{case_id}` cho {member.mention}!", ephemeral=True)
 
-# ================= READY =================
+@bot.tree.command(name="help", description="❓ Hướng dẫn sử dụng bot")
+async def help_command(interaction: discord.Interaction):
+    """Hiển thị hướng dẫn sử dụng"""
+    
+    embed = ciara_embed(
+        "❓ HƯỚNG DẪN SỬ DỤNG",
+        f"## Lệnh cho mọi người\n"
+        f"• `/xemseo` - Xem hồ sơ vi phạm của bạn\n"
+        f"• `/dashboard` - Xem thống kê tổng quan\n"
+        f"• `/help` - Xem hướng dẫn này\n\n"
+        f"## Lệnh Admin\n"
+        f"• `/ghiseo @member [lý do]` - Ghi nhận vi phạm\n"
+        f"• `/xacnhanphat @member` - Xác nhận đã đóng phạt\n"
+        f"• `/xoaseo @member [case_id]` - Xóa vi phạm\n\n"
+        f"## Hệ thống hình phạt\n"
+        f"{chr(10).join(f'**{k}.** {v}' for k, v in PENALTY.items())}",
+        0x9B59B6
+    )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# ================= EVENTS =================
 @bot.event
 async def on_ready():
-    guild = discord.Object(id=GUILD_ID)
-    bot.tree.clear_commands(guild=guild)
-    await bot.tree.sync(guild=guild)
-    auto_ping_unpaid.start()
-    print("⚔️ CIARA BOT ONLINE")
+    """Khi bot online"""
+    print(f"✅ {bot.user.name} đã online!")
+    print(f"📊 Guilds: {len(bot.guilds)}")
+    print(f"👥 Users: {len(bot.users)}")
+    
+    try:
+        # Sync commands
+        if GUILD_ID:
+            guild = discord.Object(id=GUILD_ID)
+            bot.tree.clear_commands(guild=guild)
+            synced = await bot.tree.sync(guild=guild)
+            print(f"✅ Đã sync {len(synced)} lệnh cho guild {GUILD_ID}")
+        else:
+            synced = await bot.tree.sync()
+            print(f"✅ Đã sync {len(synced)} lệnh global")
+        
+        # Start auto ping task
+        if not auto_ping_unpaid.is_running():
+            auto_ping_unpaid.start()
+            print("✅ Đã bật auto ping")
+        
+        print("⚔️ CIARA BOT SẴN SÀNG CHIẾN ĐẤU!")
+        
+    except Exception as e:
+        print(f"❌ Lỗi khi sync: {e}")
 
-bot.run(TOKEN)
+@bot.event
+async def on_command_error(ctx, error):
+    """Handle errors"""
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ Bạn không có quyền sử dụng lệnh này!")
+    elif isinstance(error, commands.MemberNotFound):
+        await ctx.send("❌ Không tìm thấy thành viên!")
+    else:
+        print(f"❌ Lỗi: {error}")
+
+# ================= RUN BOT =================
+if __name__ == "__main__":
+    if not TOKEN:
+        print("❌ Thiếu DISCORD_TOKEN trong environment variables!")
+    else:
+        try:
+            bot.run(TOKEN)
+        except Exception as e:
+            print(f"❌ Lỗi khởi động bot: {e}")
