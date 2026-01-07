@@ -135,6 +135,17 @@ class ConfirmView(discord.ui.View):
         self.record["paid_at"] = datetime.now(VN_TZ).isoformat()
         save()
         button.disabled = True
+        # 🔥 NẾU KHÔNG CÒN SẸO CHƯA ĐÓNG → GỠ ROLE
+        records = get_user(self.member.id)
+        if all(r.get("paid") for r in records):
+             if VI_PHAM_ROLE_ID:
+                 role = self.member.guild.get_role(VI_PHAM_ROLE_ID)
+                 if role and role in self.member.roles:
+                      await self.member.remove_roles(
+                           role,
+                           reason="Đã đóng toàn bộ sẹo"
+                       )
+
 
         try:
             await self.member.send(
