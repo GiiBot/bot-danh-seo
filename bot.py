@@ -122,14 +122,15 @@ async def on_message(message: discord.Message):
 
     fund_cur.execute("UPDATE fund SET balance=? WHERE id=1", (new_bal,))
     fund_cur.execute(
-        "INSERT INTO logs VALUES (NULL,?,?,?)",
-        (
-            str(message.author),
-            value,
-            message.content,
-            datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M")
-        )
+    "INSERT INTO logs (user, amount, content, time) VALUES (?,?,?,?)",
+    (
+        str(message.author),
+        value,
+        message.content,
+        datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M")
     )
+)
+
     fund_conn.commit()
 
     embed = discord.Embed(
