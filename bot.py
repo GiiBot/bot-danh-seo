@@ -38,7 +38,6 @@ PENALTY = {
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ================= DATA (SẸO) =================
@@ -83,16 +82,28 @@ fund_cur.execute("INSERT OR IGNORE INTO fund (id, balance) VALUES (1, 0)")
 fund_conn.commit()
 
 # ================= UTILS =================
-def is_admin(m): 
+def is_admin(m: discord.Member):
     return m.guild_permissions.administrator
 
-def format_money(x):
+def next_case():
+    data["case_id"] += 1
+    save()
+    return f"#{data['case_id']:04d}"
+
+def get_user(uid):
+    uid = str(uid)
+    if uid not in data["users"]:
+        data["users"][uid] = []
+        save()
+    return data["users"][uid]
+
+def format_money(x: int):
     return f"{x:,}".replace(",", ".")
 
 # ================= ON MESSAGE (SỔ QUỸ) =================
 @bot.event
 async def on_message(message: discord.Message):
-    # ❗ CHO PHÉP USER + BOT
+    # CHO PHÉP USER + BOT GHI QUỸ
     if message.channel.id != FUND_CHANNEL_ID:
         await bot.process_commands(message)
         return
@@ -120,17 +131,21 @@ async def on_message(message: discord.Message):
     if new_bal < 0:
         return
 
-    fund_cur.execute("UPDATE fund SET balance=? WHERE id=1", (new_bal,))
     fund_cur.execute(
-    "INSERT INTO logs (user, amount, content, time) VALUES (?,?,?,?)",
-    (
-        str(message.author),
-        value,
-        message.content,
-        datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M")
+        "UPDATE fund SET balance=? WHERE id=1",
+        (new_bal,)
     )
-)
 
+    # 🔥 FIX LỖI 5 CỘT – 4 VALUE (CHỈ RÕ TÊN CỘT)
+    fund_cur.execute(
+        "INSERT INTO logs (user, amount, content, time) VALUES (?,?,?,?)",
+        (
+            str(message.author),
+            value,
+            message.content,
+            datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M")
+        )
+    )
     fund_conn.commit()
 
     embed = discord.Embed(
