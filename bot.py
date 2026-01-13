@@ -8,7 +8,9 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
 VI_PHAM_ROLE_ID = int(os.getenv("VI_PHAM_ROLE_ID", "0"))
 FUND_CHANNEL_ID = int(os.getenv("FUND_CHANNEL_ID", "0"))
-BQT_ROLE_ID = int(os.getenv("BQT_ROLE_ID", "0"))
+BQT_ROLE_IDS = [
+    int(x) for x in os.getenv("BQT_ROLE_ID", "").split(",") if x.strip().isdigit()
+]
 
 DATA_FILE = "data.json"
 FUND_DB_FILE = "fund.db"
