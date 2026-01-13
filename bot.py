@@ -176,13 +176,11 @@ async def on_message(message: discord.Message):
     await bot.process_commands(message)
 
 # ================= READY =================
-@bot.tree.command(name="logquy", description="Xem lịch sử quỹ chiếm đóng")
-async def logquy(interaction: discord.Interaction, limit: int = 10):
-    if not is_admin(interaction.user):
-        return await interaction.response.send_message(
-            "❌ Admin only",
-            ephemeral=True
-        )
+@bot.command(name="logquy")
+async def logquy(ctx, limit: int = 10):
+    # Chỉ admin xem
+    if not ctx.author.guild_permissions.administrator:
+        return await ctx.send("❌ Admin only")
 
     fund_cur.execute(
         "SELECT user, amount, content, time FROM logs ORDER BY id DESC LIMIT ?",
@@ -191,10 +189,7 @@ async def logquy(interaction: discord.Interaction, limit: int = 10):
     rows = fund_cur.fetchall()
 
     if not rows:
-        return await interaction.response.send_message(
-            "📭 Chưa có giao dịch nào",
-            ephemeral=True
-        )
+        return await ctx.send("📭 Chưa có giao dịch nào")
 
     msg = ""
     for user, amount, content, time in rows:
@@ -205,10 +200,11 @@ async def logquy(interaction: discord.Interaction, limit: int = 10):
             f"{content}\n\n"
         )
 
-    await interaction.response.send_message(
-        f"```{msg}```",
-        ephemeral=True
-    )
+    # Discord giới hạn 2000 ký tự → cắt nếu dài
+    if len(msg) > 1900:
+        msg = msg[:1900] + "\n..."
+
+    await ctx.send(f"```{msg}```")
 
 @bot.event
 async def on_ready():
